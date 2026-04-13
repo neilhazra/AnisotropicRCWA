@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+RCWA1D/__init__.py
+RCWA1D/layer.py
+RCWA1D/solver.py
+RCWA1D/stack.py
+RCWA1D/visualize.py
+RCWA1D.egg-info/PKG-INFO
+RCWA1D.egg-info/SOURCES.txt
+RCWA1D.egg-info/dependency_links.txt
+RCWA1D.egg-info/requires.txt
+RCWA1D.egg-info/top_level.txt
