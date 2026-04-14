@@ -23,11 +23,11 @@ pip install -e .[dev]
 ## Usage
 
 ```python
-from RCWA1D import Layer, Solver, Stack
+from rcwa import Layer, Solver, Stack
 ```
 
 You can also import submodules directly, for example:
 
 ```python
-from RCWA1D.visualize import create_stack_xz_profile
+from rcwa.visualize import create_stack_xz_profile
 ```
