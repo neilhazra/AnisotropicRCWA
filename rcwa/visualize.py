@@ -122,7 +122,7 @@ def _field_k_at_batched_depths(
     # propagating left outgoing through would blow up
     # so instead propagate right incoming backwards through the material 
     modal_coeffs = jnp.concatenate(
-        [
+        [f
             jnp.exp(eigenvalues[:half][None, :] * z_norm[:, None]) * substrateside_coeffs[:half][None, :],
             jnp.exp(-eigenvalues[half:][None, :] * (thickness_norm[None, None] - z_norm[:, None])) * superstrateside_coeffs[half:][None, :],
         ], axis = -1

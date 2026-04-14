@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "RCWA1D"
+name = "rcwa"
 dynamic = ["version"]
 description = "One-dimensional rigorous coupled-wave analysis tools for layered periodic structures."
 readme = "README.md"
@@ -35,7 +35,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["RCWA1D"]
+packages = ["rcwa"]
 
 [tool.setuptools.dynamic]
-version = { attr = "RCWA1D.__version__" }
+version = { attr = "rcwa.__version__" }
