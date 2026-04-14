@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-import numpy as jnp
+from .backend import jnp
 
 
 

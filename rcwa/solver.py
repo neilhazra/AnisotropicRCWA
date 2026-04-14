@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 
-import numpy as jnp
-import scipy.linalg
+from .backend import jnp, linalg
 
 from .stack import Stack
 
@@ -71,7 +70,7 @@ class Solver:
     @staticmethod
     def _block_diagonal_matrix(blocks: jnp.ndarray) -> jnp.ndarray:
         """Assemble a dense block-diagonal matrix from blocks[block, row, col]."""
-        return scipy.linalg.block_diag(*blocks)
+        return linalg.block_diag(*blocks)
 
     @staticmethod
     def _normalize_columns(vectors: jnp.ndarray, tol: float = 1e-14) -> jnp.ndarray:
@@ -363,5 +362,4 @@ class Solver:
         r = refl_E / norm[None, :]
         t = trans_E / norm[None, :]
         return r, t
-
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import numpy as jnp
+from .backend import jnp
 
 from .layer import Layer
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import numpy as jnp
+from .backend import jnp
 
 from .solver import Solver
 from .stack import Stack
