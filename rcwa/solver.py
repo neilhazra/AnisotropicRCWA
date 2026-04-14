@@ -289,7 +289,11 @@ class Solver:
         for i, layer in enumerate(layer_qs):
             layer_tang = stack.layer_reduced_to_tangential_field_transform_component_major(i, N, num_points)
             eigvals, layer_field = Solver.diagonalize_sort_layer_system(layer)
-            TMInterface = jnp.linalg.inv(layer_field) @ jnp.linalg.inv(layer_tang) @ in_field_tang @ in_field
+            #TMInterface = jnp.linalg.inv(layer_field) @ jnp.linalg.inv(layer_tang) @ in_field_tang @ in_field
+            TMInterface = jnp.linalg.solve(
+                                            layer_tang @ layer_field,
+                                            in_field_tang @ in_field,
+                                        )
             S_Mat_interface = Solver.transfer_to_scattering(TMInterface)
             Modal_prop = Solver.modal_propagation_scattering_matrix(eigvals, stack.thickness_normalized(i))
             S_layer = Solver.redheffer_star_product(S_Mat_interface, Modal_prop)
