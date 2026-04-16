@@ -37,14 +37,23 @@ def _solve_stack(stack: Stack, N: int, num_points_rcwa: int, verbose: bool = Fal
     blocks = []
     layer_modes = []
     _log(verbose, f"Building Q matrices for {n_layers} layer(s)")
-    for i, q_layer in enumerate(stack.build_all_Q_matrices_normalized(N, num_points_rcwa, verbose=verbose)):
+    for i, (layer, q_layer) in enumerate(
+        zip(
+            stack.layers,
+            stack.build_all_Q_matrices_normalized(N, num_points_rcwa, verbose=verbose),
+        )
+    ):
         _log(verbose, f"--- Layer {i + 1}/{n_layers} ---")
         layer_tangential = stack.layer_reduced_to_tangential_field_transform_component_major(
             i,
             N,
             num_points_rcwa,
         )
-        eigenvalues, mode_fields = Solver.diagonalize_sort_layer_system(q_layer, verbose=verbose)
+        eigenvalues, mode_fields = Solver.diagonalize_sort_layer_system(
+            q_layer,
+            verbose=verbose,
+            is_homogeneous=layer.is_homogeneous,
+        )
         _log(verbose, f"  Computing tangential mode fields (matrix multiply, {mat_size}x{mat_size})")
         current_layer_mode_tangential = layer_tangential @ mode_fields
         _log(verbose, f"  Computing interface S-matrix (linear solve + transfer-to-scattering, {mat_size}x{mat_size})")

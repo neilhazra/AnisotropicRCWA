@@ -21,6 +21,7 @@ class Layer:
     thickness_nm: float
     x_domain_nm: tuple[float, float]
     eps_fn: DielectricTensorFn
+    is_homogeneous: bool = False
     _field_quantities_cache: dict[int, FieldQuantities] = field(default_factory=dict, init=False, repr=False)
     _fourier_coefficients_cache: dict[tuple[int, int], FourierCoefficients] = field(
         default_factory=dict,
@@ -211,6 +212,7 @@ class Layer:
             thickness_nm=thickness_nm,
             x_domain_nm=x_domain_nm,
             eps_fn=lambda x_nm, _eps=eps_tensor: jnp.broadcast_to(_eps, (*x_nm.shape, 3, 3)),
+            is_homogeneous=True,
         )
 
     @staticmethod
@@ -230,7 +232,12 @@ class Layer:
             idx = jnp.clip(idx, 0, len(segments) - 1)
             return tensors[idx]
 
-        return Layer(thickness_nm=thickness_nm, x_domain_nm=x_domain_nm, eps_fn=eps_fn)
+        return Layer(
+            thickness_nm=thickness_nm,
+            x_domain_nm=x_domain_nm,
+            eps_fn=eps_fn,
+            is_homogeneous=False,
+        )
 
     def build_toeplitz_fourier_matrices(self, N: int, num_points: int = 512, verbose: bool = False) -> dict[str, jnp.ndarray]:
         """Build one Toeplitz Fourier-convolution matrix per field quantity."""

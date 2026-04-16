@@ -260,20 +260,79 @@ class Solver:
         )
 
     @staticmethod
-    def diagonalize_sort_layer_system(q_layer, verbose: bool = False):
-        # will inherit whatever convention q_layer is passed in
+    def _sort_modes_by_propagation(
+        eigvals: jnp.ndarray,
+        eigvecs: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Sort modes so forward/decaying +z solutions come first."""
+        evanescent_comp = jnp.real(eigvals)
+        propagating_comp = -jnp.imag(eigvals)
+        # Decaying into +z is definitely in the "forward region" since it will
+        # be negative. In the -iwt convention propagating in +z is positive, so
+        # flip the sign so positive imag goes first.
+        sorter = jnp.where(jnp.abs(evanescent_comp) > 1e-9, evanescent_comp, propagating_comp)
+        idx = jnp.argsort(sorter, axis=-1)
+        return (
+            jnp.take_along_axis(eigvals, idx, axis=-1),
+            jnp.take_along_axis(eigvecs, idx[..., None, :], axis=-1),
+        )
+
+    @staticmethod
+    def _diagonalize_sort_dense_layer_system(q_layer: jnp.ndarray, verbose: bool = False):
+        """Diagonalize a general layer Q matrix with a dense eigensolve."""
         n = q_layer.shape[0]
         Solver._log(verbose, f"  Full eigendecomposition: eig on {n}x{n} matrix (NOT block diagonal)")
         eig_val, eig_vec = jnp.linalg.eig(q_layer)
-        evanescent_comp = jnp.real(eig_val) 
-        propagating_comp = -jnp.imag(eig_val)
-        # decaying into +z is definitely in the "forward region" since it will be negative
-        # in -iwt convention propagating in +z is positive so flip the sign so positive imag goes first
-        sorter = jnp.where(jnp.abs(evanescent_comp) > 1e-9, evanescent_comp, propagating_comp)
-        idx = jnp.argsort(sorter, axis=-1)
-        eigvals = jnp.take_along_axis(eig_val, idx, axis=-1)
-        eigvecs = jnp.take_along_axis(eig_vec, idx[..., None, :], axis=-1)
+        return Solver._sort_modes_by_propagation(eig_val, eig_vec)
+
+    @staticmethod
+    def _diagonalize_sort_homogeneous_layer_system(q_layer: jnp.ndarray, verbose: bool = False):
+        """Diagonalize a homogeneous layer via its harmonic 4x4 block structure."""
+        n = q_layer.shape[0]
+        if q_layer.ndim != 2 or q_layer.shape[0] != q_layer.shape[1] or n % 4 != 0:
+            raise ValueError(f"Expected a square layer Q matrix with size divisible by 4, got {q_layer.shape}.")
+
+        num_h = n // 4
+        Solver._log(
+            verbose,
+            f"  Homogeneous layer block diagonalization: batched eig on {num_h} independent 4x4 blocks (NOT full {n}x{n})",
+        )
+        q_layer_harmonic = Solver.component_to_harmonic_major(q_layer)
+        q_blocks = Solver._harmonic_diag_blocks_block_diagonal(q_layer_harmonic)
+        eigvals_blocks, eigvecs_blocks = jnp.linalg.eig(q_blocks)
+        eigvals_blocks, eigvecs_blocks = Solver._sort_modes_by_propagation(
+            eigvals_blocks,
+            eigvecs_blocks,
+        )
+
+        mode_to_field_harmonic = Solver._block_diagonal_matrix(eigvecs_blocks)
+        modal_reorder = jnp.array(
+            [4 * h + m for h in range(num_h) for m in range(2)]
+            + [4 * h + m for h in range(num_h) for m in range(2, 4)],
+            dtype=jnp.int32,
+        )
+        eigvals = jnp.concatenate(
+            [
+                eigvals_blocks[:, :2].reshape(-1),
+                eigvals_blocks[:, 2:].reshape(-1),
+            ],
+            axis=0,
+        )
+        eigvecs = Solver.harmonic_to_component_major_rows(
+            mode_to_field_harmonic[:, modal_reorder]
+        )
         return eigvals, eigvecs
+
+    @staticmethod
+    def diagonalize_sort_layer_system(
+        q_layer,
+        verbose: bool = False,
+        is_homogeneous: bool = False,
+    ):
+        """Diagonalize a layer Q matrix and order forward modes before backward modes."""
+        if is_homogeneous:
+            return Solver._diagonalize_sort_homogeneous_layer_system(q_layer, verbose=verbose)
+        return Solver._diagonalize_sort_dense_layer_system(q_layer, verbose=verbose)
 
     @staticmethod
     def total_scattering_matrix(
@@ -297,10 +356,14 @@ class Solver:
         in_field = substrate_mode_to_field
         in_field_tang = substrate_tang
         S_total = None
-        for i, layer in enumerate(layer_qs):
+        for i, (layer, q_layer) in enumerate(zip(stack.layers, layer_qs)):
             Solver._log(verbose, f"--- Layer {i + 1}/{n_layers} ---")
             layer_tang = stack.layer_reduced_to_tangential_field_transform_component_major(i, N, num_points)
-            eigvals, layer_field = Solver.diagonalize_sort_layer_system(layer, verbose=verbose)
+            eigvals, layer_field = Solver.diagonalize_sort_layer_system(
+                q_layer,
+                verbose=verbose,
+                is_homogeneous=layer.is_homogeneous,
+            )
             Solver._log(verbose, f"  Computing interface transfer matrix (linear solve, {mat_size}x{mat_size})")
             #TMInterface = jnp.linalg.inv(layer_field) @ jnp.linalg.inv(layer_tang) @ in_field_tang @ in_field
             TMInterface = jnp.linalg.solve(
@@ -386,4 +449,3 @@ class Solver:
         r = refl_E / norm[None, :]
         t = trans_E / norm[None, :]
         return r, t
-
