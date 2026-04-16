@@ -113,7 +113,7 @@ def _layer_face_coefficients(
     layer_index: int,
 ) -> tuple[jnp.ndarray, jnp.ndarray]: # output in transfer matrix type arrangement (i.e all substrate side fields, all superstrate side fields)
     incident_coeffs = jnp.zeros(2 * Stack.num_harmonics(N), dtype=jnp.complex128)
-    incident_coeffs = incident_coeffs.at[Solver.zero_order_mode_index(N, incident_pol.upper())].set(1.0)
+    incident_coeffs[Solver.zero_order_mode_index(N, incident_pol.upper())] = 1.0
     substrate_side_i = 2 * layer_index + 1
     _, _, A21, A22 = sub2lay[substrate_side_i] # scattering matrix that takes substrate modes to the modes of substrate side of layer_i
                                     # note 0 index of prefix is the identity
