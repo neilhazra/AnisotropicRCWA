@@ -10,13 +10,25 @@ DEFAULT_NUM_POINTS_Z = 65
 DEFAULT_NUM_POINTS_RCWA = 2048
 SUPPORTED_COMPONENTS = ["-H_y", "H_x", "E_y", "E_x"]
 
-def _solve_stack(stack: Stack, N: int, num_points_rcwa: int):
+
+def _log(verbose: bool, message: str) -> None:
+    if verbose:
+        print(f"[Visualize] {message}")
+
+
+def _solve_stack(stack: Stack, N: int, num_points_rcwa: int, verbose: bool = False):
     #sub 2 sup is the scattering matrix that takes substrate modes
     # and propagates it to each interface
-    # sup 2 sub takes the interface mode to superstrate modes, stiched together by tangential field continutity 
+    # sup 2 sub takes the interface mode to superstrate modes, stiched together by tangential field continutity
+    num_h = Stack.num_harmonics(N)
+    mat_size = 4 * num_h
+    n_layers = len(stack.layers)
+    _log(verbose, f"Solving stack for field visualization: N={N}, {n_layers} layer(s), matrix size {mat_size}x{mat_size}")
+    _log(verbose, f"Diagonalizing substrate halfspace (block diagonalization, {num_h} independent 4x4 blocks)")
     substrate_modes = Solver.harmonic_to_component_major_rows(
-        Solver.get_substrate_mode_to_field(stack, N, num_points_rcwa)
+        Solver.get_substrate_mode_to_field(stack, N, num_points_rcwa, verbose=verbose)
     )
+    _log(verbose, f"Building substrate tangential transform (matrix multiply, {mat_size}x{mat_size})")
     prev_mode_tangential = (
         stack.substrate_reduced_to_tangential_field_transform_component_major(N)
         @ substrate_modes
@@ -24,19 +36,24 @@ def _solve_stack(stack: Stack, N: int, num_points_rcwa: int):
 
     blocks = []
     layer_modes = []
-    for i, q_layer in enumerate(stack.build_all_Q_matrices_normalized(N, num_points_rcwa)):
+    _log(verbose, f"Building Q matrices for {n_layers} layer(s)")
+    for i, q_layer in enumerate(stack.build_all_Q_matrices_normalized(N, num_points_rcwa, verbose=verbose)):
+        _log(verbose, f"--- Layer {i + 1}/{n_layers} ---")
         layer_tangential = stack.layer_reduced_to_tangential_field_transform_component_major(
             i,
             N,
             num_points_rcwa,
         )
-        eigenvalues, mode_fields = Solver.diagonalize_sort_layer_system(q_layer)
+        eigenvalues, mode_fields = Solver.diagonalize_sort_layer_system(q_layer, verbose=verbose)
+        _log(verbose, f"  Computing tangential mode fields (matrix multiply, {mat_size}x{mat_size})")
         current_layer_mode_tangential = layer_tangential @ mode_fields
+        _log(verbose, f"  Computing interface S-matrix (linear solve + transfer-to-scattering, {mat_size}x{mat_size})")
         blocks.append(
             Solver.transfer_to_scattering(
                 jnp.linalg.solve(current_layer_mode_tangential, prev_mode_tangential) # this gives prior mode to current layer mode
             )
         )
+        _log(verbose, f"  Computing modal propagation S-matrix")
         blocks.append(
             Solver.modal_propagation_scattering_matrix( # propagates mode through current layer
                 eigenvalues,
@@ -46,13 +63,15 @@ def _solve_stack(stack: Stack, N: int, num_points_rcwa: int):
         layer_modes.append((eigenvalues, mode_fields))
         prev_mode_tangential = current_layer_mode_tangential
 
+    _log(verbose, f"Diagonalizing superstrate halfspace (block diagonalization, {num_h} independent 4x4 blocks)")
     superstrate_modes = Solver.harmonic_to_component_major_rows(
-        Solver.get_superstrate_mode_to_field(stack, N, num_points_rcwa)
+        Solver.get_superstrate_mode_to_field(stack, N, num_points_rcwa, verbose=verbose)
     )
     right_tangential = (
         stack.superstrate_reduced_to_tangential_field_transform_component_major(N)
         @ superstrate_modes
     )
+    _log(verbose, f"Computing final superstrate interface S-matrix (linear solve, {mat_size}x{mat_size})")
     blocks.append(
         Solver.transfer_to_scattering(jnp.linalg.solve(right_tangential, prev_mode_tangential))
     )
@@ -62,14 +81,18 @@ def _solve_stack(stack: Stack, N: int, num_points_rcwa: int):
     eye = jnp.eye(half, dtype=blocks[0][0].dtype)
     identity = (zero, eye, eye, zero)
 
+    n_blocks = len(blocks)
+    _log(verbose, f"Building sub2lay prefix S-matrices ({n_blocks} Redheffer star products, forward pass)")
     sub2lay = [identity]
     for block in blocks:
         sub2lay.append(Solver.redheffer_star_product(sub2lay[-1], block))
 
+    _log(verbose, f"Building lay2sup suffix S-matrices ({n_blocks} Redheffer star products, backward pass)")
     lay2sup = [identity for _ in range(len(blocks) + 1)]
     for i in range(len(blocks) - 1, -1, -1):
         lay2sup[i] = Solver.redheffer_star_product(blocks[i], lay2sup[i + 1])
 
+    _log(verbose, "Stack solve complete")
     return sub2lay, lay2sup, layer_modes
 
 
@@ -188,10 +211,12 @@ def create_layer_xz_profiles(
     verbose: bool = False,
 ) -> list[tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
     if verbose:
-        print(f"Solving stack for visualization: N={N}, layers={len(stack.layers)}")
-    sub2lay, lay2sup, layer_modes = _solve_stack(stack, N, num_points_rcwa)
+        print(f"[Visualize] Creating layer xz profiles: N={N}, {len(stack.layers)} layer(s), {num_points_x}x pts, {num_points_z}z pts")
+    sub2lay, lay2sup, layer_modes = _solve_stack(stack, N, num_points_rcwa, verbose=verbose)
     profiles = []
     for layer_index in range(len(stack.layers)):
+        _log(verbose, f"Reconstructing fields for layer {layer_index + 1}/{len(stack.layers)} (TE + TM)")
+
         x_nm, z_nm, field_te_czx = _create_layer_profile(
             stack,
             sub2lay,

@@ -196,11 +196,14 @@ class Solver:
         return zero, identity, identity, zero
 
     @staticmethod
-    def _isotropic_halfspace_mode_to_field(Q_halfspace: jnp.ndarray, N: int) -> jnp.ndarray:
+    def _isotropic_halfspace_mode_to_field(Q_halfspace: jnp.ndarray, N: int, verbose: bool = False) -> jnp.ndarray:
         """Input Q: component-major. Output rows: harmonic-major [-H_y, H_x, E_y, D_x].
         Output columns: [FTE(-N..N), FTM(-N..N), BTE(-N..N), BTM(-N..N)]."""
+        num_h = Stack.num_harmonics(N)
+        Solver._log(verbose, f"  Extracting {num_h} diagonal 4x4 blocks from harmonic-major Q")
         Q_halfspace_harmonic = Solver.component_to_harmonic_major(Q_halfspace)
         Q_blocks_iso = Solver._harmonic_diag_blocks_block_diagonal(Q_halfspace_harmonic)
+        Solver._log(verbose, f"  Block diagonalization: batched eig on {num_h} independent 4x4 blocks (NOT full {4*num_h}x{4*num_h})")
         eigvals, eigvecs = jnp.linalg.eig(Q_blocks_iso)
 
         # Classify raw isotropic half-space modes by solver-wide propagation
@@ -227,8 +230,8 @@ class Solver:
         # [FTE(h), FTM(h), BTE(h), BTM(h)] for each harmonic h, so reorder the
         # columns into the solver-wide modal layout
         # [FTE(-N..N), FTM(-N..N), BTE(-N..N), BTM(-N..N)].
+        Solver._log(verbose, f"  Assembling block-diagonal mode-to-field matrix ({4*num_h}x{4*num_h}) from {num_h} blocks")
         mode_to_field_halfspace = Solver._block_diagonal_matrix(halfspace_blocks)
-        num_h = Stack.num_harmonics(N)
         modal_reorder = jnp.array(
             [4 * h + 0 for h in range(num_h)]
             + [4 * h + 1 for h in range(num_h)]
@@ -239,24 +242,28 @@ class Solver:
         return mode_to_field_halfspace[:, modal_reorder]
 
     @staticmethod
-    def get_substrate_mode_to_field(stack: Stack, N: int, num_points: int = 512):
+    def get_substrate_mode_to_field(stack: Stack, N: int, num_points: int = 512, verbose: bool = False):
         """Return the isotropic substrate modes-to-fields matrix. Rows: harmonic-major."""
         return Solver._isotropic_halfspace_mode_to_field(
             stack.get_Q_substrate_normalized(N, num_points),
             N,
+            verbose=verbose,
         )
 
     @staticmethod
-    def get_superstrate_mode_to_field(stack: Stack, N: int, num_points: int = 512):
+    def get_superstrate_mode_to_field(stack: Stack, N: int, num_points: int = 512, verbose: bool = False):
         """Return the isotropic superstrate modes-to-fields matrix. Rows: harmonic-major."""
         return Solver._isotropic_halfspace_mode_to_field(
             stack.get_Q_superstrate_normalized(N, num_points),
             N,
+            verbose=verbose,
         )
 
     @staticmethod
-    def diagonalize_sort_layer_system(q_layer):
+    def diagonalize_sort_layer_system(q_layer, verbose: bool = False):
         # will inherit whatever convention q_layer is passed in
+        n = q_layer.shape[0]
+        Solver._log(verbose, f"  Full eigendecomposition: eig on {n}x{n} matrix (NOT block diagonal)")
         eig_val, eig_vec = jnp.linalg.eig(q_layer)
         evanescent_comp = jnp.real(eig_val) 
         propagating_comp = -jnp.imag(eig_val)
@@ -277,36 +284,51 @@ class Solver:
     ) -> ScatteringMatrix:
         """Return the stack S-matrix in substrate/superstrate modal bases.
         Convention is """
+        num_h = Stack.num_harmonics(N)
+        mat_size = 4 * num_h
+        n_layers = len(stack.layers)
+        Solver._log(verbose, f"Building Q matrices for {n_layers} layer(s) (matrix size {mat_size}x{mat_size})")
+        layer_qs = stack.build_all_Q_matrices_normalized(N, num_points, verbose=verbose)
+        Solver._log(verbose, f"Diagonalizing substrate halfspace (block diagonalization, {num_h} independent 4x4 blocks)")
         substrate_mode_to_field = Solver.harmonic_to_component_major_rows(
-            Solver.get_substrate_mode_to_field(stack, N, num_points)
+            Solver.get_substrate_mode_to_field(stack, N, num_points, verbose=verbose)
         )
         substrate_tang = stack.substrate_reduced_to_tangential_field_transform_component_major(N)
-        layer_qs = stack.build_all_Q_matrices_normalized(N, num_points)
         in_field = substrate_mode_to_field
         in_field_tang = substrate_tang
         S_total = None
         for i, layer in enumerate(layer_qs):
+            Solver._log(verbose, f"--- Layer {i + 1}/{n_layers} ---")
             layer_tang = stack.layer_reduced_to_tangential_field_transform_component_major(i, N, num_points)
-            eigvals, layer_field = Solver.diagonalize_sort_layer_system(layer)
+            eigvals, layer_field = Solver.diagonalize_sort_layer_system(layer, verbose=verbose)
+            Solver._log(verbose, f"  Computing interface transfer matrix (linear solve, {mat_size}x{mat_size})")
             #TMInterface = jnp.linalg.inv(layer_field) @ jnp.linalg.inv(layer_tang) @ in_field_tang @ in_field
             TMInterface = jnp.linalg.solve(
                                             layer_tang @ layer_field,
                                             in_field_tang @ in_field,
                                         )
+            Solver._log(verbose, f"  Converting transfer matrix to scattering matrix")
             S_Mat_interface = Solver.transfer_to_scattering(TMInterface)
+            Solver._log(verbose, f"  Computing modal propagation S-matrix")
             Modal_prop = Solver.modal_propagation_scattering_matrix(eigvals, stack.thickness_normalized(i))
+            Solver._log(verbose, f"  Redheffer star product: interface x propagation")
             S_layer = Solver.redheffer_star_product(S_Mat_interface, Modal_prop)
+            Solver._log(verbose, f"  Redheffer star product: accumulating total S-matrix")
             S_total = S_layer if S_total is None else Solver.redheffer_star_product(S_total, S_layer)
             in_field = layer_field
             in_field_tang = layer_tang
 
+        Solver._log(verbose, f"Diagonalizing superstrate halfspace (block diagonalization, {num_h} independent 4x4 blocks)")
         out_field = Solver.harmonic_to_component_major_rows(
-            Solver.get_superstrate_mode_to_field(stack, N, num_points)
+            Solver.get_superstrate_mode_to_field(stack, N, num_points, verbose=verbose)
         )
         out_tang = stack.superstrate_reduced_to_tangential_field_transform_component_major(N)
+        Solver._log(verbose, f"Computing final superstrate interface (matrix inversion + multiply, {mat_size}x{mat_size})")
         TMInterface = jnp.linalg.inv(out_field) @ jnp.linalg.inv(out_tang) @ in_field_tang @ in_field
         S_Mat_interface = Solver.transfer_to_scattering(TMInterface)
+        Solver._log(verbose, "Redheffer star product: accumulating final interface")
         S_total = S_Mat_interface if S_total is None else Solver.redheffer_star_product(S_total, S_Mat_interface)
+        Solver._log(verbose, "Total scattering matrix complete")
 
         return (
             S_total,
@@ -323,6 +345,7 @@ class Solver:
         verbose: bool = True,
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Return (r, t) E-field ratio matrices. Rows: [Ey(-N..N), Ex(-N..N)]. Cols: [TE(-N..N), TM(-N..N)]."""
+        Solver._log(verbose, f"Computing reflection/transmission for N={N}, {len(stack.layers)} layer(s)")
         (S11, _, S21, _), in_f, i_f_t, o_f, o_f_t = Solver.total_scattering_matrix(
             stack,
             N,
@@ -333,6 +356,7 @@ class Solver:
         half = S11.shape[0]
         num_h = Stack.num_harmonics(N)
 
+        Solver._log(verbose, f"Extracting E-field ratios (matrix multiplications, {4*num_h}x{half})")
         # Full tangential-field matrices: (4*num_h, 4*num_h)
         # Columns split as [forward_modes | backward_modes], each half wide.
         F_sub = i_f_t @ in_f   # substrate

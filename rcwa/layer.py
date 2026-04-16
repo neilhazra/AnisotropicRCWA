@@ -6,6 +6,10 @@ from typing import Callable
 from .backend import jnp
 
 
+def _log(verbose: bool, message: str) -> None:
+    if verbose:
+        print(f"[Layer] {message}")
+
 
 FourierCoefficients = dict[str, jnp.ndarray]
 FieldQuantities = dict[str, jnp.ndarray]
@@ -228,11 +232,14 @@ class Layer:
 
         return Layer(thickness_nm=thickness_nm, x_domain_nm=x_domain_nm, eps_fn=eps_fn)
 
-    def build_toeplitz_fourier_matrices(self, N: int, num_points: int = 512) -> dict[str, jnp.ndarray]:
+    def build_toeplitz_fourier_matrices(self, N: int, num_points: int = 512, verbose: bool = False) -> dict[str, jnp.ndarray]:
         """Build one Toeplitz Fourier-convolution matrix per field quantity."""
         cache_key = (N, num_points)
         if cache_key not in self._toeplitz_cache:
+            num_h = 2 * N + 1
+            _log(verbose, f"    Computing Fourier coefficients via FFT ({num_points}-point, {len(self.field_quantities(num_points))} field quantities)")
             fourier_coeffs = self.fourier_coefficients(N, num_points=num_points)
+            _log(verbose, f"    Assembling {len(fourier_coeffs)} Toeplitz convolution matrices ({num_h}x{num_h} each)")
             harmonic_orders = jnp.arange(-N, N + 1)
             difference_indices = (
                 harmonic_orders[:, None] - harmonic_orders[None, :] + 2 * N
@@ -242,6 +249,8 @@ class Layer:
                 key: coeffs[difference_indices]
                 for key, coeffs in fourier_coeffs.items()
             }
+        else:
+            _log(verbose, f"    Toeplitz matrices (N={N}, pts={num_points}) retrieved from cache")
         return self._toeplitz_cache[cache_key]
 
     @staticmethod

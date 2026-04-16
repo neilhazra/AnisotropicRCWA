@@ -7,6 +7,11 @@ from .backend import jnp
 from .layer import Layer
 
 
+def _log(verbose: bool, message: str) -> None:
+    if verbose:
+        print(f"[Stack] {message}")
+
+
 @dataclass
 class Stack:
     """A stack of x-periodic layers between isotropic substrate and superstrate.
@@ -71,13 +76,17 @@ class Stack:
         self._uniform_q_cache.clear()
 
     def layer_Q_matrix_normalized(
-        self, layer_index: int, N: int, num_points: int = 512
+        self, layer_index: int, N: int, num_points: int = 512, verbose: bool = False
     ) -> jnp.ndarray:
         """Build one layer's full normalized Q matrix. Output: component-major basis."""
+        num_h = self.num_harmonics(N)
+        _log(verbose, f"  Layer {layer_index}: building Toeplitz Fourier-convolution matrices ({num_h}x{num_h} each)")
         toeplitz_matrices = self.layers[layer_index].build_toeplitz_fourier_matrices(
             N,
             num_points=num_points,
+            verbose=verbose,
         )
+        _log(verbose, f"  Layer {layer_index}: assembling Q matrix ({4*num_h}x{4*num_h}, component-major, block matrix multiplications)")
         return Layer.build_Q_matrix_normalized(
             self.harmonic_orders(N),
             self.harmonic_orders(N),
@@ -104,10 +113,11 @@ class Stack:
             N,
         )
 
-    def build_all_Q_matrices_normalized(self, N: int, num_points: int = 512) -> list[jnp.ndarray]:
+    def build_all_Q_matrices_normalized(self, N: int, num_points: int = 512, verbose: bool = False) -> list[jnp.ndarray]:
         """Build every layer's Q matrix. Output: component-major basis."""
+        _log(verbose, f"Building Q matrices for {len(self.layers)} layer(s), N={N}, num_points={num_points}")
         return [
-            self.layer_Q_matrix_normalized(i, N, num_points=num_points)
+            self.layer_Q_matrix_normalized(i, N, num_points=num_points, verbose=verbose)
             for i in range(len(self.layers))
         ]
 
