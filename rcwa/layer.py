@@ -56,7 +56,7 @@ class Layer:
     def sample_eps(self, num_points: int) -> jnp.ndarray:
         """Sample the dielectric tensor on the layer FFT grid."""
         return self.eps(self.sample_points(num_points))
-
+    
     @staticmethod
     def _field_quantities_from_eps(eps: jnp.ndarray) -> FieldQuantities:
         """Build the reduced dielectric quantities and shorthand compounds."""
@@ -81,6 +81,8 @@ class Layer:
             "hat_eps_yx": eps_yx - eps_yz * inv_eps_zz * eps_zx,
             "hat_eps_yy": eps_yy - eps_yz * inv_eps_zz * eps_zy,
             "inv_eps_zz": inv_eps_zz,
+            "inv_eps_zz_eps_zx": inv_eps_zz * eps_zx,
+            "inv_eps_zz_eps_zy": inv_eps_zz * eps_zy,
         }
 
         # This is \hat{\epsilon}_{xx}^{-1}(x), which appears repeatedly in the
@@ -298,7 +300,32 @@ class Layer:
             [-inv_hat_eps_xx_c @ K_x, zero, -inv_hat_eps_xx_hat_eps_xy, inv_hat_eps_xx],
         ]
         return jnp.block(blocks)
+    
+    @staticmethod
+    def build_tangential_to_E_xyz_transform_component_major(
+        toeplitz_matrices: dict[str, jnp.ndarray],
+        N: int,
+        kappa_normalized: float,
+        G_normalized: float,
+    ) -> jnp.ndarray:
+        """Maps tangential field [-H_y, H_x, E_y, E_x] -> [E_x, E_y, E_z], component-major.
+        Output shape: (3*num_h, 4*num_h).
+        """
+        num_h = 2 * N + 1
+        identity = jnp.eye(num_h, dtype=jnp.complex128)
+        zero = jnp.zeros((num_h, num_h), dtype=jnp.complex128)
+        K_x = Layer.build_K_x_diag_matrix(kappa_normalized, G_normalized, N)
 
+        inv_eps_zz = toeplitz_matrices["inv_eps_zz"]
+        inv_eps_zz_eps_zx = toeplitz_matrices["inv_eps_zz_eps_zx"]
+        inv_eps_zz_eps_zy = toeplitz_matrices["inv_eps_zz_eps_zy"]
+
+        return jnp.block([
+            [zero,             zero, zero,                 identity],          # E_x
+            [zero,             zero, identity,             zero],              # E_y
+            [inv_eps_zz @ K_x, zero, -inv_eps_zz_eps_zy,  -inv_eps_zz_eps_zx] # E_z
+        ])
+    
     @staticmethod
     def build_reduced_to_tangential_field_transform_harmonic_major(
         toeplitz_matrices: dict[str, jnp.ndarray],

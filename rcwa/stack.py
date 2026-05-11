@@ -8,8 +8,9 @@ from .layer import Layer
 
 
 def _log(verbose: bool, message: str) -> None:
-    if verbose:
-        print(f"[Stack] {message}")
+    pass
+    # if verbose:
+    #     print(f"[Stack] {message}")
 
 
 @dataclass
@@ -227,4 +228,32 @@ class Stack:
         return self._uniform_medium_reduced_to_tangential_field_transform_component_major(
             self.eps_superstrate,
             N,
+        )
+
+    def build_all_layer_reduced_to_tangential_field_transform_component_major(self, N: int, num_points: int = 512):
+        return [
+            self.layer_reduced_to_tangential_field_transform_component_major(i, N, num_points=num_points)
+            for i in range(len(self.layers))
+        ]
+    
+    def layer_tangential_to_E_xyz_transform_component_major(
+        self,
+        layer_index: int,
+        N: int,
+        num_points: int = 512,
+    ) -> jnp.ndarray:
+        """Input/output: component-major.
+
+        Maps [-H_y, H_x, E_y, E_x] -> [E_x, E_y, E_z]
+        for a physical layer.
+        """
+        toeplitz_matrices = self.layers[layer_index].build_toeplitz_fourier_matrices(
+            N,
+            num_points=num_points,
+        )
+        return Layer.build_tangential_to_E_xyz_transform_component_major(
+            toeplitz_matrices,
+            N,
+            self.kappa_normalized,
+            self.G_normalized,
         )

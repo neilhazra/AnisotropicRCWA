@@ -16,8 +16,9 @@ class Solver:
     @staticmethod
     def _log(verbose: bool, message: str) -> None:
         """Print a solver progress message when verbose output is enabled."""
-        if verbose:
-            print(f"[Solver] {message}")
+        pass
+        # if verbose:
+        #     print(f"[Solver] {message}")
 
     @staticmethod
     def component_to_harmonic_major(matrix: jnp.ndarray) -> jnp.ndarray:
